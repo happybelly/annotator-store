@@ -89,6 +89,18 @@ def root():
                     },
                     'desc': "Create a new annotation"
                 },
+                'createbundle': {
+                    'method': 'POST',
+                    'url': url_for('.create_annotation_bundle', _external=True),
+                    'query': {
+                        'refresh': {
+                            'type': 'bool',
+                            'desc': ("Force an index refresh after create "
+                                     "(default: true)")
+                        }
+                    },
+                    'desc': "Create a new annotation bundle"
+                },
                 'read': {
                     'method': 'GET',
                     'url': url_for('.read_annotation',
@@ -178,6 +190,49 @@ def create_annotation():
         location = url_for('.read_annotation', docid=annotation['id'])
 
         return jsonify(annotation), 201, {'Location': location}
+    else:
+        return jsonify('No JSON payload sent. Annotation not created.',
+                       status=400)
+
+# CREATE A BULK ANNOTATION
+@store.route('/bulkannotations', methods=['POST'])
+def create_annotation_bundle():
+    # Only registered users can create annotations
+    if g.user is None:
+        return _failed_authz_response('create annotation')
+
+    if request.json is not None:
+
+        locations = []
+        annotations = []
+        for raw_annotation in request.json:
+            annotation = g.annotation_class(
+                _filter_input(
+                    raw_annotation,
+                    CREATE_FILTER_FIELDS))
+
+            # print raw_annotation
+
+            annotation['consumer'] = g.user.consumer.key
+            if _get_annotation_user(annotation) != g.user.id:
+                annotation['user'] = g.user.id
+
+            if hasattr(g, 'before_annotation_create'):
+                g.before_annotation_create(annotation)
+
+            if hasattr(g, 'after_annotation_create'):
+                annotation.save(refresh=False)
+                g.after_annotation_create(annotation)
+
+            refresh = request.args.get('refresh') != 'false'
+            annotation.save(refresh=refresh)
+
+            location = url_for('.read_annotation', docid=annotation['id'])
+            locations.append(location)
+            annotations.append(annotation)
+
+        # print "Total %d annotations added\n" % (len(annotations))
+        return jsonify(annotations), 201
     else:
         return jsonify('No JSON payload sent. Annotation not created.',
                        status=400)
